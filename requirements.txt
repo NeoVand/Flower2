@@ -1,0 +1,8 @@
+numpy
+autograd
+scipy
+scikit-learn
+Flask
+eventlet
+flask-socketio
+pyedflib
