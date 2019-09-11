@@ -60,12 +60,12 @@ def remove_xfix(strs):
 #         print("Trained loss:", loss(thetas))
 #     # do something with thetas
 
-def highpass_filter(y, sr):
-  filter_low_stop_freq = 0.01  # Hz
-  filter_low_pass_freq = 0.1  # Hz
-  filter_high_pass_freq = 50.0
-  filter_high_stop_freq = 50.1
-  filter_order = 2001
+def highpass_filter(y, sr, lcf, hcf, fs):
+  filter_low_stop_freq = lcf  # Hz
+  filter_low_pass_freq = lcf+0.1  # Hz
+  filter_high_pass_freq = hcf
+  filter_high_stop_freq = hcf+0.1
+  filter_order = fs
 
   # High-pass filter
   nyquist_rate = sr / 2.
@@ -83,7 +83,7 @@ ALLOWED_EXTENSIONS = {'edf','bdf'}
 app = Flask(__name__)
 app.config['EDF_UPLOAD_FOLDER'] = EDF_UPLOAD_FOLDER
 app.secret_key = 'blahblahblah'
-socketio = SocketIO(app)
+socketio = SocketIO(app,pingInterval = 10000, pingTimeout= 5000)
 
 @app.route('/')
 def index():
@@ -128,6 +128,13 @@ def connect():
 
 ##################################################################################################
 ##################################################################################################
+
+
+@socketio.on('preprocess')
+def preprocess():
+    pass
+
+
 @socketio.on('init_process')
 def raw_process(dic):
     frame = dic['frame']
@@ -138,14 +145,21 @@ def raw_process(dic):
     if data['processed']:
         emit('init_data',data['out'])
     else:
+        
+        emit('process_message','Filtering Data...')
+        socketio.sleep(0)
+        
         print('processing raw data ... ')
         data['signal_raw'] = np.stack(data['selected_channel_list'])
-        data['signal_raw']=data['signal_raw'][:,::4] # implement down_sampling later
+        data['signal_raw'] = data['signal_raw'][:,::data['resampling_rate']] 
+        data['signal_raw'] = highpass_filter(data['signal_raw'],data['sampling_freq'],data['lcf'],data['hcf'],data['filter_size'])
         # optim_order(data['signal_raw'])
         num_samples = len(data['signal_raw'][0])
         num_channels = len(data['signal_raw'])
         
         emit('process_message','Standardizing Data...')
+        socketio.sleep(0)
+
         data['signal_raw'] = data['signal_raw']-np.mean(data['signal_raw'],axis=0).reshape(1,num_samples)
         data['signal_raw'] = data['signal_raw'] - np.mean(data['signal_raw'], axis=1).reshape(num_channels,1)
         data['signal_raw'] = data['signal_raw']/np.std(data['signal_raw'],axis=0).reshape(1,num_samples)
@@ -153,6 +167,8 @@ def raw_process(dic):
     
         
         emit('process_message','Dimensionality Reduction...')
+        socketio.sleep(0)
+
         # model = FastICA(n_components=3, random_state=0)
         model = MiniBatchDictionaryLearning(n_components=3, alpha=0.1,
                                                 n_iter=10, batch_size=200,
@@ -163,7 +179,9 @@ def raw_process(dic):
         data['W'] = data['W']-np.mean(data['W'],axis=0).reshape(1,3)
         data['W'] = 0.5+ 0.5*data['W']/np.std(data['W'],axis=0).reshape(1,3)
         print('file processed. Data is ready to be served')
+        
         emit('process_message','Sending Data...')
+        socketio.sleep(0)
 
         # shift = 0
         # data['out'] = {'raw':data['signal_raw'][:,shift:shift+500].T,'flower':data['signal_interp'][:,shift:shift+500].T,'color':data['W'][shift:shift+500]}
@@ -199,9 +217,9 @@ def load_edf():
     channel_list = []
     standard_channels = []
     for i in np.arange(n):
-        raw_channel = f.readSignal(i)#[::4]
-        filtered_signal = highpass_filter(raw_channel,sampling_freqs[i])
-        channel_list.append(filtered_signal)
+        raw_channel = f.readSignal(i)
+        # filtered_signal = highpass_filter(raw_channel,sampling_freqs[i])
+        channel_list.append(raw_channel)
     data['raw_channel_list']=channel_list
     print('standardizing ...')
     for channel in channel_list:
@@ -216,13 +234,28 @@ def load_edf():
 
     return jsonify({'channel_labels':labels, 'file_duration':file_duration, 'preview':preview})
 
-@app.route('/gui',  methods=['GET', 'POST'])
-def gui():
+
+@app.route('/settings',  methods=['GET', 'POST'])
+def settings():
     global data
     if request.method == 'POST':
         selected_channel_indices  = [int(box) for box in request.form]
         data['selected_channel_list'] = [data['raw_channel_list'][index] for index in selected_channel_indices]
         data['selected_channel_labels'] = remove_xfix([data['channel_labels'][index] for index in selected_channel_indices])
+        data['sampling_freq'] = [data['sampling_freqs'][index] for index in selected_channel_indices][0]
+        return render_template('settings.html',f=int(data['sampling_freq']))
+    return redirect(request.url)
+
+@app.route('/gui',  methods=['GET', 'POST'])
+def gui():
+    global data
+    if request.method == 'POST':
+        data['resampling_rate']=int(request.form['sf'])
+        data['sampling_freq']= data['sampling_freq']/data['resampling_rate']
+        data['lcf']=float(request.form['lcf'])
+        data['hcf']=float(request.form['hcf'])
+        data['filter_size']=int(request.form['fs'])
+        print(data['resampling_rate'],data['lcf'])
         return render_template('gui.html')
     return redirect(request.url)
 

@@ -11,7 +11,8 @@
     <link href="https://fonts.googleapis.com/css?family=Patua+One&display=swap" rel="stylesheet">
     <script type="text/javascript" src="./static/js/dat.gui.js"></script>
     <script type="text/javascript" src="./static/js/colorconvert.js"></script>
-    <script src="./static/js/three.min.js"></script>  
+    <script src="./static/js/three.min.js"></script> 
+ 
 
 <title>Settings</title>
 </head>
@@ -20,18 +21,128 @@
         <div class="container">
             <div class="row">
                 <div id="centerb" class="col text-center">
-                    <div id="processing">Processing...</div>
-                    <div id="spinner" class="lds-ripple"><div></div><div></div></div>
+                        <form action="/gui" method="post" onsubmit="return validate();">
+                            <fieldset>
+                                <legend class="formtext">Filtering and Down-sampling Settings</legend>
+                                <div>
+                                        <label class="formtext" for="sf">Sampling Frequency (Hz)</label>
+                                        <select id="sf" name="sf" class="formel">
+                                            <option value="1">{{f}}</option>
+                                            <option value="2">{{f/2}}</option>
+                                            <option value="3">{{f/3}}</option>
+                                            <option value="4">{{f/4}}</option>
+                                            <option value="5">{{f/5}}</option>
+                                            <option value="6">{{f/6}}</option>
+                                        </select>
+                                </div>
+
+                                <div>
+                                        <label class="formtext" for="lcf">Low cutoff frequency (Hz)</label>  
+                                        <input id="lcf" name="lcf" type="text" value="0.1" size="1" class="formel">
+                                </div>
+
+                                <div>
+                                        <label class="formtext" for="hcf">High cutoff frequency (Hz)</label>  
+                                        <input id="hcf" name="hcf" type="text" value="50" size="1" class="formel">
+                                </div>
+
+                                <div>
+                                        <label class="formtext" for="fs">Filter Size (High=Slow)</label>
+                                        <select id="fs" name="fs" class="formel" >
+                                            <option value="501">501</option>
+                                            <option value="1001">1001</option>
+                                            <option value="2001">2001</option>
+                                        </select>
+                                </div>
+                                <div>
+                                        <input type="submit" value="Next" id="channel_submit" class="btn-primary formel">
+                                </div>
+
+                            </fieldset>
+                        </form>
+
                 </div>
             </div>
         </div>  
-    </div> 
+    </div>
+    
+    </div>
+    <!-- <span id="freq" value="{{f}}"></span> -->
+    
 
 <script>
-var socket = io.connect('http://' + document.domain + ':' + location.port);
-socket.on('connect', function() {
-console.log('Websocket connected!');
-});
+
+// let submit = document.getElementById('channel_submit');
+// submit.style.display = 'none';
+
+function validate(){
+    let freq = parseFloat("{{f|tojson}}");
+    let hcf = parseFloat(document.getElementById('hcf').value);
+    let lcf = parseFloat(document.getElementById('lcf').value);
+    let sf = parseFloat(document.getElementById('sf').value);
+    console.log(freq);
+    if(isNaN(lcf)){alert('Enter a number for LCF'); return false;}
+    if(isNaN(hcf)){alert('Enter a number for HCF'); return false;}
+    if(lcf<hcf && hcf<0.5*freq/sf){
+        return true;
+    }
+    else{
+        alert('Make Sure LCF < HCF < SF/2');
+        return false;
+    }
+
+}
+
+
 
 </script>
 </body>
+
+<!-- <div class="formcontainer" style="width: 50%; margin: auto;">
+        <form action="/gui" method="post">
+            <fieldset>
+        
+            <legend class="formtext">Filtering and Down-sampling Settings</legend>
+        
+            <div class="form-group">
+                <label class="col-md-4 control-label formtext" for="sf">Sampling Frequency (Hz)</label>
+                <div class="col-md-2">
+                <select id="sf" name="sf" class="form-control">
+                    <option value="1000">1000</option>
+                    <option value="500">500</option>
+                </select>
+                </div>
+            </div>
+        
+            <div class="form-group">
+                <label class="col-md-4 control-label formtext" for="hcf">High cutoff frequency (Hz)</label>  
+                <div class="col-md-2">
+                <input id="hcf" name="hcf" type="text" placeholder="50" class="form-control input-md">
+                
+                </div>
+            </div>
+        
+            <div class="form-group">
+                <label class="col-md-4 control-label formtext" for="lcf">low cutoff frequency (HZ)</label>  
+                <div class="col-md-2">
+                <input id="lcf" name="lcf" type="text" placeholder="0.1" class="form-control input-md">
+                
+                </div>
+            </div>
+        
+            <div class="form-group">
+                <label class="col-md-4 control-label formtext" for="filtsize">Filter Size</label>
+                <div class="col-md-2">
+                <select id="filtsize" name="filtsize" class="form-control">
+                    <option value="501">501</option>
+                    <option value="1001">1001</option>
+                    <option value="2001">2001</option>
+                </select>
+                </div>
+            </div>
+        
+            <input type="submit" value="Next" id="channel_submit" class="btn-primary">
+            </fieldset>
+    </form> -->
+
+        

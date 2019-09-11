@@ -23,7 +23,7 @@
                             <div class="col text-center">
                                 <div id="processing">Processing...</div>
                                 <div id="spinner" class="lds-ripple"><div></div><div></div></div>
-                                <form action="/gui" method="post">
+                                <form action="/settings" method="post" onsubmit="return validate()">
                                     <div id="chanlist" class="scrollbar", style='display:none;'></div>
                                     <input type="submit" value="Next" id="channel_submit" class="btn-primary">
                                 </form>
@@ -35,6 +35,30 @@
 
 
 <script>
+
+params = {}
+
+freqs = {};
+
+function validate(){
+    let selected_freqs = new Array();
+    for(let i=0;i<params.chan_count;i++){
+        let box = document.getElementById(String(i));
+        // console.log(box);
+        if(box.checked){
+            selected_freqs.push(freqs[i])
+        }
+    }
+    let uniqueFreqs = [...new Set(selected_freqs)];
+    if(uniqueFreqs.length>1){
+        alert('All selected channels should have the same sampling frequency');
+        return false;
+    }
+    else{
+        return true;
+    }
+    
+}
 
 let submit = document.getElementById('channel_submit');
 submit.style.display = 'none';
@@ -50,12 +74,13 @@ socket.on('connect', function() {
 socket.on('edf_info',function(info){
     // console.log(info);
     let channel_labels = info['channel_labels'];
+    params.chan_count = channel_labels.length;
     let file_duration = info['file_duration'];
     let preview = info['preview'];
     
 
     let message = document.getElementById('processing');
-    message.innerHTML="Select Channels to Display";
+    message.innerHTML="Select Channels with Identical Sampling Rate to Display";
     let spinner = document.getElementById('spinner');
     spinner.style.display  = 'none';
     let chanlist  = document.getElementById('chanlist');
@@ -98,6 +123,8 @@ socket.on('edf_info',function(info){
     for(let i =0; i<channel_labels.length;i++){
         name = channel_labels[i][0];
         fps  = channel_labels[i][1];
+        freqs[i]=fps;
+
         var tr = document.createElement('tr');   
 
         var td1 = document.createElement('td');
@@ -112,10 +139,17 @@ socket.on('edf_info',function(info){
         checkbox.type = 'checkbox';
         checkbox.checked = true;
         checkbox.name = i;
+        checkbox.id = String(i);
+        // checkbox.addEventListener( 'change', function() {
+        // if(this.checked) {
+        //     // Checkbox is checked..
+        // } else {
+        //     // Checkbox is not checked..
+        // }
+        // });
+
         var text1 = document.createTextNode(name);
         var text2 = document.createTextNode(fps);
-
-
         var canvas = document.createElement('canvas');
         canvas.width= 400;
         canvas.height = 40;

@@ -215,3 +215,14 @@ input[type=checkbox]
   z-index: 10000 !important;
 
   }
+
+  .formtext{
+    color: white;
+    font-family: 'Arima Madurai', cursive;
+  }
+
+  .formel{
+    border-radius: 8px;
+    opacity: 0.8;
+    text-align: center;
+  }
