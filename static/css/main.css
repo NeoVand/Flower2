@@ -193,7 +193,7 @@ input[type=checkbox]
 
 .dg .c input[type=text] {
   margin-top: -3px !important;
-  background: #1a1a1a !important;
+  background: #000000 !important;
 }
 
 .dg .cr.boolean {
@@ -202,6 +202,9 @@ input[type=checkbox]
 
 .dg .cr.number {
   border-left: 0px solid #2FA1D6 !important;
+}
+.dg .property-name {
+  color: dimgray;
 }
 
 
@@ -226,3 +229,9 @@ input[type=checkbox]
     opacity: 0.8;
     text-align: center;
   }
+
+  .dg li:not(.folder) {
+    background: #000000 !important;
+    border-bottom: 0px solid #2c2c2c;
+}
+

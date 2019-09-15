@@ -29,10 +29,11 @@
 <script>
 
 let cfg = {
-    amp:20,
-    opacity:1,
-    line_width:1,
-    color_scale:0,
+    amp:21,
+    opacity:0.5,
+    line_width:4,
+    color_scale:1,
+    color_shift:0,
     hue_shift:0,
     saturation:1,
     brightness:1,
@@ -42,18 +43,24 @@ let cfg = {
     bgcolor:"#000000",
     canvas:null,
     diameter:300,
-    swarm:false,
-    frame:300,
-    depth:300,
+    trends:false,
+    frame:200,
+    depth:200,
     step:1,
-    wheel:30,
+    wheel:5,
     animate:false,
     req:null,
     connected:false,
-    res:0.4,
+    res:0.8,
     guidectx:false,
+    overcanvas:false,
     rulers:false,
-    sigpreview:false
+    sigpreview:false,
+    tention:0.0,
+    lastX : 6000,
+    lastY : 6000,
+    timeline:false,
+    locator:false
 };
 
 
@@ -65,7 +72,7 @@ socket.on('connect', function() {
     }
     else{
         cfg.connected = true;
-        socket.emit('init_process',{'frame':cfg.depth,'depth':cfg.depth});
+        socket.emit('init_process',{'frame':2*cfg.depth,'depth':2*cfg.depth});
 
     }
 });
@@ -81,6 +88,7 @@ function setFrame(){
     // cfg.flower = slice(cfg.allFlower,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
     cfg.raw =  slice(cfg.allRaw,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
     cfg.colors = slice(cfg.allColor,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
+    cfg.thickness = slice(cfg.allThickness,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
 }
 
 function zoom(event) {
@@ -89,6 +97,7 @@ function zoom(event) {
             cfg.frame =Math.max(cfg.frame-cfg.wheel*dy,1);
             setFrame();
             draw();
+            makeLocator();
             if(cfg.sigpreview){
                 makeGuide();
                 gradDisk();
@@ -101,8 +110,10 @@ socket.on('init_data',function(data){
     // cfg.allFlower = data['flower'];
     cfg.allColor = data['color'];
     cfg.allRaw = data['raw'];
+    cfg.allThickness = data['thickness'];
     cfg.maxframes  = data['full_size'];
     cfg.labels = data['labels'];
+    cfg.sampling_freq = data['sampling_freq'];
 
     console.log('data received- numsamples:',data['raw'].length)
     console.log('allraw len:',cfg.allRaw.length)
@@ -129,13 +140,17 @@ socket.on('init_data',function(data){
     cfg.ctx = ctx;
     document.body.appendChild(stack);
     stack.appendChild(canvas);
+    makeTimeline();
     draw();
     makeGuide();
+    makeOverlay();
+    makeLocator();
 
     let gui = new dat.GUI();
     cfg.gui = gui;
 
-    gui.add(cfg, 'swarm').onChange(function(value) {
+    gui.add(cfg, 'trends').onChange(function(value) {
+        makeGuide();
         draw();
     });
     gui.add(cfg, 'rulers').onChange(function(value) {
@@ -144,6 +159,7 @@ socket.on('init_data',function(data){
     let frame_handler = gui.add(cfg, 'frame').min(1).max(cfg.allColor.length).step(1).listen().onChange(function(value) {
         setFrame();
         draw();
+        makeLocator();
     });
     cfg.frame_handler = frame_handler;
     stream_batches();
@@ -151,6 +167,7 @@ socket.on('init_data',function(data){
     gui.add(cfg, 'depth').min(10).max(1000).step(1).onChange(function(value) {
         setFrame();
         draw();
+        makeLocator();
     });
     gui.add(cfg, 'step').min(1).max(10).step(1).onChange(function(value) {
         setFrame();
@@ -165,6 +182,9 @@ socket.on('init_data',function(data){
         draw();
         makeGuide();
     });
+    gui.add(cfg, 'tention').min(0).max(1).step(0.01).onChange(function(value) {
+        draw();
+    });
     gui.add(cfg, 'res').min(0.1).max(1.5).step(0.1).onChange(function(value) {
         draw();
     });
@@ -175,23 +195,36 @@ socket.on('init_data',function(data){
     gui.add(cfg, 'line_width').min(0.01).max(5).step(0.01).onChange(function(value) {
         draw();
     });
-    gui.add(cfg, 'color_scale').min(-256).max(256).step(0.01).onChange(function(value) {
+    gui.add(cfg, 'color_scale').min(0.1).max(2).step(0.01).onChange(function(value) {
         draw();
-    });
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
+    gui.add(cfg, 'color_shift').min(-256).max(256).step(0.01).onChange(function(value) {
+        draw();
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
 
     gui.add(cfg, 'hue_shift').min(0).max(1).step(0.01).onChange(function(value) {
         draw();
-    });
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
 
     gui.add(cfg, 'saturation').min(0.01).max(1).step(0.01).onChange(function(value) {
         draw();
-    });
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
 
     gui.add(cfg, 'brightness').min(0.01).max(2).step(0.01).onChange(function(value) {
         draw();
-    });
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
 
-    gui.add(cfg, 'wheel').min(1).max(60).step(1);
+    gui.add(cfg, 'wheel').min(1).max(10).step(1);
     
     gui.add(cfg, 'animate').onChange(function(value){
         if(value){
@@ -215,6 +248,9 @@ function stream_batches(){
 socket.on('batch_data',function(data){
     cfg.allColor = cfg.allColor.concat(data['color']);
     cfg.allRaw = cfg.allRaw.concat(data['raw']);
+    cfg.allThickness = cfg.allThickness.concat(data['thickness']);
+    makeTimeline();
+
     cfg.frame_handler.max(cfg.allColor.length);
     if(cfg.allColor.length<cfg.maxframes){
         stream_batches();
@@ -226,6 +262,7 @@ function animate(){
     cfg.frame = (cfg.frame+cfg.wheel)%(cfg.allColor.length-1);
     setFrame();
     draw();
+    makeLocator();
     if(cfg.sigpreview){
                 makeGuide();
                 gradDisk();
@@ -235,71 +272,27 @@ function animate(){
 
 }
 
-function draw(slow=false){
-    if(cfg.swarm){
-        swarm(slow)
+function draw(){
+    if(cfg.trends){
+        drawTrends()
     }
     else{
-        drawFlower(slow)
+        drawFlower()
     }
 }
 
 function colorize(col){
     cs= cfg.color_scale;
-    let cols = [cs+256*col[0],cs+256*col[1],cs+256*col[2]];
+    csh = cfg.color_shift;
+    cols = new Array();
+    for(let i=0;i<3;i++){
+        let color = csh+256*cs*col[i];
+        cols.push(color);
+    }
     cols = rgbToHsl(...cols);
     cols = hslToRgb(cfg.hue_shift+cols[0]-Math.floor(cfg.hue_shift+cols[0]), cfg.saturation*cols[1], cfg.brightness*cols[2]);
     return cols;
 }
-
-
-async function swarm(slow=false){
-    let diameter = cfg.diameter;
-    let amp =cfg.amp;
-    let opacity = cfg.opacity;
-    let ctx = cfg.ctx;
-    let cs = cfg.color_scale
-    let raw = cfg.raw;
-    let colors = cfg.colors;
-    const num_points = raw[0].length;
-    const num_samples = raw.length;
-    ctx.fillStyle = cfg.bgcolor;
-    ctx.fillRect(0, 0, cfg.canvas.width, cfg.canvas.height);
-    // var canvasData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
-    //ctx.putImageData(canvasData, 0, 0);
-
-
-    for(let t=0;t<num_samples;t++){
-        for(let i=0;i<num_points-4;i++){
-            let j=i+1;
-            let k=i+2;
-            let l=i+3;
-            let m=i+4;
-            function layout(xs,ys){
-                function makePoint(a,b,c){
-                    x=450+xs*(Math.sqrt(diameter)+amp)*(raw[t][a]-raw[t][b]);
-                    y=450+ys*(Math.sqrt(diameter)+amp)*(raw[t][a]-raw[t][c]);
-                    ctx.fillRect(x,y,cfg.line_width,cfg.line_width);
-                }
-                makePoint(i,j,k);
-                makePoint(j,k,l);
-                makePoint(k,l,m);
-                makePoint(l,m,i);
-                makePoint(m,i,j);
-            }
-            cols =colorize(colors[t]);
-            ss = `rgba(${cols[0]},${cols[1]},${cols[2]},${opacity*t/num_samples})`;
-            ctx.fillStyle = ss;
-
-            layout(1,1);
-            layout(-1,-1);
-            layout(1,-1);
-            layout(-1,1);
-        }
-    }
-}
-
-
 
 async function drawFlower(slow=false){
     let diameter=cfg.diameter;
@@ -315,50 +308,218 @@ async function drawFlower(slow=false){
 
 
     ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
-    
+    ctx.save();
     for(let i=0;i<num_samples-1;i++){
 
         let vectors = raw[i].map((v,k)=>{
             let theta = -2*Math.PI*k/(num_chans)
-            let r =  0.1+(diameter+amp*v)*i/num_samples;
+            let r =  (diameter+amp*v)*i/num_samples;
             let x = 450+r*Math.cos(theta);
             let y = 450+r*Math.sin(theta);
             let z = 0;
             return new THREE.Vector3( x, y, z );
         });
-        let curve = new THREE.CatmullRomCurve3(vectors,closed=true);
+        let curve = new THREE.CatmullRomCurve3(vectors,closed=true,type="catmullrom",tention=cfg.tention);
         let points = curve.getPoints( num_chans+Math.floor(cfg.res*i) );
         let num_points = points.length;        
-        for(let j=0; j<num_points;j++){
-
-            let x1 = points[j].x;
-            let y1 = points[j].y;
-            let x2 = points[(j+1)%num_points].x;
-            let y2 = points[(j+1)%num_points].y;
-
-            ctx.beginPath(); 
-            // Staring point
-            ctx.moveTo(x1,y1);
-            // End point 
+        ctx.beginPath();
+        // ctx.lineJoin = "round";
+        let x1 = points[0].x;
+        let y1 = points[0].y;
+        ctx.moveTo(x1,y1);
+        // End point  
+        for(let j=1; j<num_points;j++){
+            let x2 = points[(j)%num_points].x;
+            let y2 = points[(j)%num_points].y;
             ctx.lineTo(x2,y2);
             // Make the line visible
-        
             // Set Color
-            cols =colorize(colors[i]);
-            ss = `rgba(${cols[0]},${cols[1]},${cols[2]},${opacity*i/num_samples})`;
-            ctx.strokeStyle = ss;
-            ctx.lineWidth = line_width;
-
-            ctx.stroke();
         }
+        cols =colorize(colors[i]);
+        ss = `rgba(${cols[0]},${cols[1]},${cols[2]},${opacity*i/num_samples})`;
+        ctx.strokeStyle = ss;
+        let lw = 0.2+cfg.line_width*(0.7+cfg.thickness[i]);
+        ctx.lineWidth = lw;
+        ctx.closePath();
+        ctx.stroke();
     }
+    ctx.restore();
+}
+
+function makeOverlay(){
+    if(!cfg.overcanvas){
+        let canvas = document.createElement('canvas');
+        cfg.overcanvas = canvas;
+        canvas.addEventListener('wheel',zoom);
+        canvas.width = 1800;
+        canvas.height = 1800;
+        canvas.style.width = "900px";
+        canvas.style.height = "900px";
+        let ctx = canvas.getContext('2d');
+        ctx.scale(2,2);
+        cfg.overctx = ctx;
+        let stack = document.getElementById('stack');
+        stack.appendChild(canvas);
+
+        canvas.addEventListener('mousemove',(e)=>{
+        if(!cfg.trends){
+            timeCircle(e);
+            channelHighlight(e);
+        }
+        else{
+            
+        }
+        });
+    }
+    cfg.overctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
+}
+
+function makeLocator(){
+    if(!cfg.locator){
+        let canvas = document.createElement('canvas');
+        cfg.locator = canvas;
+        canvas.width = 2400;
+        canvas.height = 100;
+        canvas.style.width = "1200px";
+        canvas.style.height = "50px";
+        let ctx = canvas.getContext('2d');
+        ctx.scale(2,2);
+        cfg.locctx = ctx;
+        let stack = document.getElementById('stack');
+        stack.appendChild(canvas);
+        canvas.addEventListener('wheel',zoom);
+        canvas.addEventListener('click',(e)=>{
+            let x = e.clientX-10;
+            cfg.frame = Math.round(cfg.maxframes*x/1180);
+            setFrame();
+            makeLocator();
+            draw();
+
+        })
+    }
+
+    let ctx = cfg.locctx;
+    ctx.clearRect(0, 0, cfg.locator.width, cfg.locator.height);
+    let x = 10+1180*(cfg.frame-cfg.depth)/cfg.maxframes;
+    let w = 1180*(cfg.depth)/cfg.maxframes;
+    let y= 5;
+    let h = 30;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x,y,w,h);
+    ctx.lineWidth = 0.6;
+    ctx.strokeStyle = 'white';
+    ctx.stroke();
+    ctx.font = "10px monospace";
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    let time = (cfg.frame/cfg.sampling_freq);
+    let minutes = Math.floor(time/60);
+    let seconds = time - minutes*60;
+    ctx.fillText(String(minutes)+":"+String(seconds.toFixed(2)), x+5, 44);
+
+    ctx.restore();
+}
+
+function makeTimeline(){
+        if(!cfg.timeline){
+        let canvas = document.createElement('canvas');
+        cfg.timeline = canvas;
+        canvas.width = 2400;
+        canvas.height = 100;
+        canvas.style.width = "1200px";
+        canvas.style.height = "50px";
+        let ctx = canvas.getContext('2d');
+        ctx.scale(2,2);
+        cfg.timectx = ctx;
+        let stack = document.getElementById('stack');
+        stack.appendChild(canvas);
+    }
+
+    let ctx = cfg.timectx;
+    let colors = cfg.allColor;
+    let thickness = cfg.allThickness;
+    let cnum = colors.length;
+    ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
+
+    for(let i=0;i<cnum-1;i++){
+        x1 = 10+1180*i/cfg.maxframes;
+        x2 = 10+1180*(i+1)/cfg.maxframes;
+        y = 20;
+        cols1 =colorize(colors[i]);
+        ss1 = `rgba(${cols1[0]},${cols1[1]},${cols1[2]},${1})`;
+        // cols2 =colorize(colors[i+1]);
+        // ss2 = `rgba(${cols2[0]},${cols2[1]},${cols2[2]},${1})`;
+        // let lineGrad = ctx.createLinearGradient(x1,y,x2,y);
+        // lineGrad.addColorStop(0.000, ss1);
+        // lineGrad.addColorStop(1.000, ss2);
+        ctx.beginPath();
+        ctx.moveTo(x1,y);
+        ctx.lineTo(x2,y);
+        let lw = 2+13*(0.7+thickness[i]);
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = ss1;
+        ctx.stroke();
+    }
+
+}
+
+function timeCircle(e){
+    let rmin = cfg.diameter+2*cfg.amp;
+    let canvas = cfg.overcanvas;
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left-450;
+    let y = 450-e.clientY - rect.top;
+    if(x!=cfg.lastX || y!=cfg.lastY){
+        // canvas.style.cursor = 'none';
+        makeOverlay();
+        let r = Math.sqrt((x*x)+(y*y));
+        if(r<rmin){
+        let ctx = cfg.overctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 2;
+        ctx.arc(450, 450, r, 0, 2 * Math.PI, false);      
+        ctx.lineWith = 1;
+        ctx.setLineDash([1, 3]);
+        ctx.strokeStyle = 'rgba(255,255,255,1)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(450,450);
+        ctx.lineTo(450+x,450-y);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(430+x/2, 440-y/2,40, 15)
+        
+        ctx.font = "10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = 'rgba(255,255,255,1)';
+        let ratio = r/cfg.diameter;
+        let delta = Math.round(ratio*1000*cfg.depth/cfg.sampling_freq);
+        ctx.fillText(String(delta)+" ms", 450+x/2, 450-y/2);
+        ctx.restore();
+        cfg.lastX = x;
+        cfg.lastY = y;
+    }
+    else{
+        canvas.style.cursor = 'default';
+    }
+    
+    }
+
 }
 
 function makeGuide(){
     if(!cfg.guidectx){
         let canvas = document.createElement('canvas');
         cfg.guidecanvas = canvas;
-        canvas.addEventListener('wheel',zoom);
+        // canvas.addEventListener('wheel',zoom);
         canvas.width = 1800;
         canvas.height = 1800;
         canvas.style.width = "900px";
@@ -368,6 +529,7 @@ function makeGuide(){
         cfg.guidectx = ctx;
         let stack = document.getElementById('stack');
         stack.appendChild(canvas);
+
     }
     let canvas = cfg.guidecanvas;
     let labels = cfg.labels;
@@ -375,6 +537,18 @@ function makeGuide(){
     let ctx = cfg.guidectx;
     ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
 
+    if(cfg.trends){
+
+    let W = cfg.canvas.width/2 -100;
+    let H = cfg.canvas.height/2-100;
+    for(let i=0;i<num_chans;i++){
+    ctx.font = "15px monospace";
+    ctx.textAlign = "right";
+    ctx.fillStyle = '#cccccc';
+    ctx.fillText(labels[i], 30, 70+i*H/num_chans);}
+
+    }
+    else{
     ctx.beginPath();
     ctx.arc(450, 450, (cfg.diameter+2*cfg.amp), 0, 2 * Math.PI, false);      
     ctx.lineWith = 5;
@@ -397,6 +571,7 @@ function makeGuide(){
         ctx.fillStyle = '#aaaaaa';
         ctx.fillText(labels[i], 0, 0);
         ctx.restore();
+    }
     }
 
     if(cfg.rulers){
@@ -423,14 +598,15 @@ function makeGuide(){
 
     }
 
-    canvas.addEventListener('mousemove',channelHighlight);
-
 }
+
+
+
 
 function channelHighlight(e){
     let rmin = cfg.diameter+2*cfg.amp;
     let rmax = 30+rmin;
-    let rect = this.getBoundingClientRect();
+    let rect = cfg.guidecanvas.getBoundingClientRect();
     let x = e.clientX - rect.left-450;
     let y = 450-e.clientY - rect.top;
     let r = Math.sqrt((x*x)+(y*y));
@@ -497,9 +673,12 @@ function signal_line(ind){
         ctx.beginPath();
         ctx.save();
         ctx.shadowColor = 'white';
-        ctx.shadowBlur = 2;
+        ctx.shadowBlur = 1;
         ctx.moveTo(x1,y1);
         ctx.lineTo(x2,y2);
+        let lw = 0.2+cfg.line_width*(0.7+cfg.thickness[i]);
+        ctx.lineWidth = lw;
+        ctx.lineCap = "round";
         ctx.strokeStyle = lineGrad;
         ctx.stroke();
         ctx.restore();
@@ -507,8 +686,50 @@ function signal_line(ind){
     ctx.font = "25px monospace";
     ctx.textAlign = "center";
     ctx.fillStyle = '#cccccc';
-    ctx.fillText(cfg.labels[ind], 450, 370);
-      
+    ctx.fillText(cfg.labels[ind], 450, 380);   
+}
+
+function drawTrends(){
+    let amp=cfg.amp;
+    let line_width = cfg.line_width;
+    let ctx = cfg.ctx;
+    let raw = cfg.raw;
+    let color = cfg.colors;
+    const num_chans = raw[0].length;
+    const num_samples = raw.length;
+    let labels = cfg.labels;
+    let W = cfg.canvas.width/2 -100;
+    let H = cfg.canvas.height/2-100;
+    ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
+    ctx.save();
+    for(let i=0;i<num_chans;i++){
+        for(let j=0;j<num_samples-1;j++){
+            cols1 =colorize(color[j]);
+            ss1 = `rgba(${cols1[0]},${cols1[1]},${cols1[2]},${1})`;
+            cols2 =colorize(color[j+1]);
+            ss2 = `rgba(${cols2[0]},${cols2[1]},${cols2[2]},${1})`;
+
+            let x1 = 50+ j*W/num_samples;
+            let x2 = 50+ (j+1)*W/num_samples;
+            let y1 = 70+i*H/num_chans-0.3*amp*raw[j][i];
+            let y2 = 70+i*H/num_chans-0.3*amp*raw[j+1][i];
+            let lineGrad = ctx.createLinearGradient(x1,y1,x2,y2);
+            lineGrad.addColorStop(0.000, ss1);
+            lineGrad.addColorStop(1.000, ss2);
+            ctx.beginPath();
+            
+            let lw = 0.2+line_width*(0.7+cfg.thickness[j]);
+            ctx.lineWidth = lw;
+            // console.log(cfg.thickness[j]);
+            ctx.moveTo(x1,y1);
+            ctx.lineTo(x2,y2);
+            ctx.strokeStyle = lineGrad;
+            // ctx.lineWidth = line_width;
+            ctx.stroke();
+        }
+
+    }
+    ctx.restore();
 }
 
 </script>

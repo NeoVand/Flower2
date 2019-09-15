@@ -142,62 +142,72 @@ def raw_process(dic):
     depth = dic['depth']
     print('req_depth: ',depth)
     global data
-    if data['processed']:
-        emit('init_data',data['out'])
-    else:
+    # if data['processed']:
+    #     emit('init_data',data['out'])
+    # else:
         
-        emit('process_message','Filtering Data...')
-        socketio.sleep(0)
-        
-        print('processing raw data ... ')
-        data['signal_raw'] = np.stack(data['selected_channel_list'])
-        data['signal_raw'] = data['signal_raw'][:,::data['resampling_rate']] 
-        data['signal_raw'] = highpass_filter(data['signal_raw'],data['sampling_freq'],data['lcf'],data['hcf'],data['filter_size'])
-        # optim_order(data['signal_raw'])
-        num_samples = len(data['signal_raw'][0])
-        num_channels = len(data['signal_raw'])
-        
-        emit('process_message','Standardizing Data...')
-        socketio.sleep(0)
-
-        data['signal_raw'] = data['signal_raw']-np.mean(data['signal_raw'],axis=0).reshape(1,num_samples)
-        data['signal_raw'] = data['signal_raw'] - np.mean(data['signal_raw'], axis=1).reshape(num_channels,1)
-        data['signal_raw'] = data['signal_raw']/np.std(data['signal_raw'],axis=0).reshape(1,num_samples)
-        print('raw data shape: ', data['signal_raw'].shape)
+    emit('process_message','Filtering Data...')
+    socketio.sleep(0)
     
-        
-        emit('process_message','Dimensionality Reduction...')
-        socketio.sleep(0)
+    print('processing raw data ... ')
+    data['signal_raw'] = np.stack(data['selected_channel_list'])
+    data['signal_raw'] = data['signal_raw'][:,::data['resampling_rate']] 
+    data['signal_raw'] = highpass_filter(data['signal_raw'],data['sampling_freq'],data['lcf'],data['hcf'],data['filter_size'])
+    # optim_order(data['signal_raw'])
+    num_samples = len(data['signal_raw'][0])
+    num_channels = len(data['signal_raw'])
+    
+    emit('process_message','Standardizing Data...')
+    socketio.sleep(0)
 
-        # model = FastICA(n_components=3, random_state=0)
-        model = MiniBatchDictionaryLearning(n_components=3, alpha=0.1,
-                                                n_iter=10, batch_size=200,
-                                                random_state=0,positive_dict=True)
-        data['W'] = model.fit_transform(data['signal_raw'].T)
+    data['signal_raw'] = data['signal_raw']-np.mean(data['signal_raw'],axis=0).reshape(1,num_samples)
+    data['signal_raw'] = data['signal_raw'] - np.mean(data['signal_raw'], axis=1).reshape(num_channels,1)
+    data['signal_raw'] = data['signal_raw']/np.std(data['signal_raw'],axis=0).reshape(1,num_samples)
+    print('raw data shape: ', data['signal_raw'].shape)
 
-        
-        data['W'] = data['W']-np.mean(data['W'],axis=0).reshape(1,3)
-        data['W'] = 0.5+ 0.5*data['W']/np.std(data['W'],axis=0).reshape(1,3)
-        print('file processed. Data is ready to be served')
-        
-        emit('process_message','Sending Data...')
-        socketio.sleep(0)
+    
+    emit('process_message','Dimensionality Reduction...')
+    socketio.sleep(0)
 
-        # shift = 0
-        # data['out'] = {'raw':data['signal_raw'][:,shift:shift+500].T,'flower':data['signal_interp'][:,shift:shift+500].T,'color':data['W'][shift:shift+500]}
-        
-        data['out'] = {'raw':data['signal_raw'][:,frame-depth:frame].T,'color':data['W'][frame-depth:frame],'full_size':len(data['signal_raw'][0]),'labels':data['selected_channel_labels']}
+    model = FastICA(n_components=4, random_state=0)
+    # model = MiniBatchDictionaryLearning(n_components=4, alpha=0.1,
+    #                                         n_iter=10, batch_size=200,
+    #                                         random_state=0,positive_dict=True)
+    data['W'] = model.fit_transform(data['signal_raw'].T)
 
-        data['out'] = jsonify(data['out'])
-        emit('init_data',data['out'])
-        print('init batch sent, num_samples=',len(data['out']['raw']))
-        data['processed'] = True
+    
+    data['W'] = data['W']-np.mean(data['W'],axis=0).reshape(1,4)
+    data['W'] = 0.5+ 0.5*data['W']/np.std(data['W'],axis=0).reshape(1,4)
+    print('file processed. Data is ready to be served')
+    
+    emit('process_message','Sending Data...')
+    socketio.sleep(0)
+
+    # shift = 0
+    # data['out'] = {'raw':data['signal_raw'][:,shift:shift+500].T,'flower':data['signal_interp'][:,shift:shift+500].T,'color':data['W'][shift:shift+500]}
+    
+    data['out'] = {'sampling_freq':data['sampling_freq'],\
+        'raw':data['signal_raw'][:,frame-depth:frame].T,\
+            'color':data['W'][frame-depth:frame,0:3],\
+                'thickness':data['W'][frame-depth:frame,3],\
+                    'full_size':len(data['signal_raw'][0]),\
+                        'labels':data['selected_channel_labels']}
+
+    data['out'] = jsonify(data['out'])
+    emit('init_data',data['out'])
+    print('init batch sent, num_samples=',len(data['out']['raw']))
+        # data['processed'] = True
 
 @socketio.on('batch')
 def send_batch(dic):
     frame = dic['frame']
     depth = dic['depth']
-    data['out'] = {'raw':data['signal_raw'][:,frame-depth:frame].T,'color':data['W'][frame-depth:frame],'full_size':len(data['signal_raw'][0]),'labels':data['selected_channel_labels']}
+    data['out'] = {'sampling_freq':data['sampling_freq'],\
+        'raw':data['signal_raw'][:,frame-depth:frame].T,\
+            'color':data['W'][frame-depth:frame,0:3],\
+                'thickness':data['W'][frame-depth:frame,3],\
+                    'full_size':len(data['signal_raw'][0]),\
+                        'labels':data['selected_channel_labels']}
     data['out'] = jsonify(data['out'])
     emit('batch_data',data['out'])
     print(f"{100*frame/len(data['signal_raw'].T)}% of the data is sent")
