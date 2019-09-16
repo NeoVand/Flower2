@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css?family=Patua+One&display=swap" rel="stylesheet">
     <script type="text/javascript" src="./static/js/dat.gui.js"></script>
     <script type="text/javascript" src="./static/js/colorconvert.js"></script>
-    <script src="./static/js/three.min.js"></script>  
+    <script src="./static/js/three.min.js"></script> 
 
 <title>GUI</title>
 </head>
@@ -25,7 +25,11 @@
                 </div>
             </div>
         </div>  
-    </div> 
+    </div>
+    <form enctype="multipart/form-data" method="POST">
+        <label id="loadmedia" class="btn btn-primary btn-file medbtn">Load Media<input id="fileinput" type="file" onchange="return videoUpload();" style="display: none;" name="file" accept=".mp4"></label>
+    </form> 
+    </form>
 <script>
 
 let cfg = {
@@ -42,7 +46,7 @@ let cfg = {
     ctx : null,
     bgcolor:"#000000",
     canvas:null,
-    diameter:300,
+    diameter:260,
     trends:false,
     frame:200,
     depth:200,
@@ -60,8 +64,11 @@ let cfg = {
     lastX : 6000,
     lastY : 6000,
     timeline:false,
-    locator:false
+    locator:false,
+    media : [],
+    projector: false
 };
+
 
 
 var socket = io.connect('http://' + document.domain + ':' + location.port);
@@ -83,6 +90,30 @@ socket.on('process_message',function(data){
     message.innerHTML=data;
 });
 
+
+function videoUpload(){
+    const fileinput = document.getElementById('fileinput');
+    let file = fileinput.files[0];
+    var data = new FormData();
+    data.append('file', file);
+    fetch('/media', {
+        method: 'POST',
+        body: data,
+    });  
+    return false;
+}
+
+socket.on('video', function(data){
+    cfg.medanot = data['annotations'];
+    let videoFileName = data['file_name'];
+    let frameRate = data['frame_rate'];
+    let video = document.createElement('video');
+    let src = "./uploads/media/"+videoFileName
+    video.src = src;
+    console.log('from socket received:',video);
+    // cfg.media.push(video);
+    // makeMedia();
+});
 
 function setFrame(){
     // cfg.flower = slice(cfg.allFlower,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
@@ -114,6 +145,11 @@ socket.on('init_data',function(data){
     cfg.maxframes  = data['full_size'];
     cfg.labels = data['labels'];
     cfg.sampling_freq = data['sampling_freq'];
+    let media_annotated = data['media_annotated'];
+    if(media_annotated){
+        let loadmediabtn = document.getElementById("loadmedia");
+        loadmediabtn.style.display = 'block';
+    }
 
     console.log('data received- numsamples:',data['raw'].length)
     console.log('allraw len:',cfg.allRaw.length)
@@ -730,6 +766,44 @@ function drawTrends(){
 
     }
     ctx.restore();
+}
+
+
+function makeMedia(){
+    if(!cfg.projector){
+        let canvas = document.createElement('canvas');
+        cfg.projector = canvas;
+        canvas.width = 2400;
+        canvas.height = 1800;
+        canvas.style.width = "1200px";
+        canvas.style.height = "900px";
+        let ctx = canvas.getContext('2d');
+        ctx.scale(2,2);
+        cfg.projctx = ctx;
+        let stack = document.getElementById('stack');
+        stack.insertBefore(canvas,stack.childNodes[0]);
+        canvas.addEventListener('wheel',zoom);
+    }
+    console.log('make media!');
+    let canvas = cfg.projector;
+    let ctx = cfg.projctx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for(let i=0;i<cfg.media.length;i++){
+        let video = cfg.media[i];
+        let vw = video.videoWidth;
+        let vh = video.videoHeight;
+        console.log('video:', video);
+        let aspectRatio = vh/vw;
+        let max_width = 1200-900-40;
+        let max_height = aspectRatio*max_width;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100,100,100,1)';
+        ctx.lineWidth = 1;
+        // ctx.strokeRect(1200-20-max_width,70,max_width,max_height);
+        ctx.fillStyle = 'rgba(100,100,100,1)';
+        ctx.fillRect(1200-20-max_width,70,max_width,max_height);
+        ctx.restore();
+    }
 }
 
 </script>

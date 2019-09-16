@@ -235,3 +235,9 @@ input[type=checkbox]
     border-bottom: 0px solid #2c2c2c;
 }
 
+.medbtn {
+  display:none;
+  position: fixed;
+  bottom: 34px;
+  right: 80px;
+}

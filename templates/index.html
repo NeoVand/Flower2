@@ -32,7 +32,7 @@
 
     <script type="module">
         import * as THREE from './static/js/three.module.js';
-        var SEPARATION = 30, AMOUNTX = 200, AMOUNTY = 200;
+        var SEPARATION = 50, AMOUNTX = 600, AMOUNTY = 600;
         var container;
         var camera, scene, renderer;
         var particles, count = 0;
@@ -97,7 +97,7 @@
         //
         function onDocumentMouseMove( event ) {
             mouseX = event.clientX - windowHalfX;
-            mouseY = event.clientY - windowHalfY;
+            mouseY = -500+event.clientY - windowHalfY;
         }
         function onDocumentTouchStart( event ) {
             if ( event.touches.length === 1 ) {
@@ -152,7 +152,7 @@
                         <div id="logo">Flower</div>
                         <div class="description">EEG Visualization in the Time Domain, by Neo Mohsenvand, mmv@mit.edu</div>
                         <form enctype="multipart/form-data" method="POST" action="/upload">
-                            <label class="btn btn-primary btn-file">Load EDF File<input id="fileinput" type="file" onchange="this.form.submit()" style="display: none;" name="file" accept=".edf;.bdf">
+                            <label class="btn btn-primary btn-file">Load EDF File<input id="fileinput" type="file" onchange="this.form.submit()" style="display: none;" name="file" accept=".edf;.bdf"></label>
                         </form>
                         
                         </label>
@@ -161,8 +161,6 @@
             </div>
             
     </div>
-
- <script src="./static/main.js"></script>
 
 </body>
 </html>

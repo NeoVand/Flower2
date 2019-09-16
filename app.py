@@ -1,18 +1,19 @@
 import os
-from flask import Flask, flash, request, redirect, url_for, render_template
+from flask import Flask, flash, request, redirect, url_for, render_template, send_from_directory
 from flask_socketio import SocketIO, emit
+# from flask_jsglue import JSGlue
 import pyedflib
-import autograd.numpy as anp
 import numpy as np
-from autograd import grad
 from scipy import signal
 from sklearn.decomposition import FastICA, MiniBatchDictionaryLearning
 import json
+import moviepy.editor as e
 
 global data
 data = {}
 data['connected'] = False
 data['processed'] = False
+data['media_file_paths'] = []
 
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
@@ -27,6 +28,17 @@ class NumpyEncoder(json.JSONEncoder):
         elif isinstance(obj,(np.ndarray,)): #### This is the fix
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
+
+def close_clip(vidya_clip):
+    try:
+        vidya_clip.reader.close()
+        del vidya_clip.reader
+        if vidya_clip.audio is not None:
+            vidya_clip.audio.reader.close_proc()
+            del vidya_clip.audio
+        del vidya_clip
+    except Exception:
+        pass
 
 def jsonify(dic):
     return json.loads(json.dumps(dic,cls=NumpyEncoder))
@@ -78,10 +90,14 @@ def highpass_filter(y, sr, lcf, hcf, fs):
   return filtered_signal
 
 EDF_UPLOAD_FOLDER = os.path.join('uploads','eeg')
+MEDIA_UPLOAD_FOLDER = os.path.join('uploads','media')
+# MEDIA_UPLOAD_FOLDER = "static"
 ALLOWED_EXTENSIONS = {'edf','bdf'}
 
 app = Flask(__name__)
+# jsglue = JSGlue(app)
 app.config['EDF_UPLOAD_FOLDER'] = EDF_UPLOAD_FOLDER
+app.config['MEDIA_UPLOAD_FOLDER'] = MEDIA_UPLOAD_FOLDER
 app.secret_key = 'blahblahblah'
 socketio = SocketIO(app,pingInterval = 10000, pingTimeout= 5000)
 
@@ -191,7 +207,7 @@ def raw_process(dic):
             'color':data['W'][frame-depth:frame,0:3],\
                 'thickness':data['W'][frame-depth:frame,3],\
                     'full_size':len(data['signal_raw'][0]),\
-                        'labels':data['selected_channel_labels']}
+                        'labels':data['selected_channel_labels'], 'media_annotated':data['media_annotated']}
 
     data['out'] = jsonify(data['out'])
     emit('init_data',data['out'])
@@ -222,6 +238,13 @@ def load_edf():
     sampling_freqs = f.getSampleFrequencies()
     data['sampling_freqs'] = sampling_freqs
     file_duration = f.getFileDuration()
+
+    data['raw_annotations'] = f.read_annotation()
+   
+        
+    # print(f'Annotations:')
+    # print(f'start: {a[0]}, end: {a[-1]}')
+    # print(f'video starts at sample {START_SAMPLE}')
 
     n = f.signals_in_file
     channel_list = []
@@ -261,13 +284,58 @@ def gui():
     global data
     if request.method == 'POST':
         data['resampling_rate']=int(request.form['sf'])
+
+        ################ process annotations ##################
+        a = data['raw_annotations']
+        if len(a)>0:
+            try:
+                data['media_annotations'] = [[np.ceil(data['sampling_freq']*(anot[0]/10000000)/data['resampling_rate']).astype(np.int),int(anot[2].split(b'#')[1])] for anot in a]
+                data['media_annotated'] = True
+
+                        #interpolate annotations
+                annot = np.array(data['media_annotations'])
+                annotations=[]
+                for i in range(len(annot)-1):
+                    p1 = annot[i]
+                    p2 = annot[i+1]
+                    num = p2[0]-p1[0]
+                    chunk = np.round(np.linspace(p1,p2,num,False)).astype(np.int)
+                    annotations.append(chunk)
+                data['media_annotations'] = np.vstack(annotations)
+            except:
+                data['media_annotated'] = False
+        else:
+            data['media_annotated'] = False
+
         data['sampling_freq']= data['sampling_freq']/data['resampling_rate']
         data['lcf']=float(request.form['lcf'])
         data['hcf']=float(request.form['hcf'])
         data['filter_size']=int(request.form['fs'])
-        print(data['resampling_rate'],data['lcf'])
         return render_template('gui.html')
     return redirect(request.url)
+
+
+@app.route('/media', methods=['POST'])
+def media():
+    global data
+    if request.method == 'POST':
+        file = request.files['file']
+        print('upload successful, file_name: ',file.filename)
+        data['media_file_paths'].append(os.path.join(app.config['MEDIA_UPLOAD_FOLDER'], file.filename))
+        file.save(data['media_file_paths'][-1])
+
+        clip = e.VideoFileClip(data['media_file_paths'][-1])
+        # print('video frame rate: ', FR)
+        FR = clip.fps
+        close_clip(clip)
+
+        out = {'file_name':file.filename,'annotations':data['media_annotations'],'frame_rate':FR}
+        socketio.emit('video',jsonify(out))
+        return "video uploaded"
+
+@app.route('/uploads/media/<filename>')
+def send_file(filename):
+    return send_from_directory(app.config['MEDIA_UPLOAD_FOLDER'], filename)
 
 
 if __name__ == "__main__":
