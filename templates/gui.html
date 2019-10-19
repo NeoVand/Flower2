@@ -26,14 +26,15 @@
             </div>
         </div>  
     </div>
+    <div id="media"><div id="videoContainer"></div></div>
+
     <form enctype="multipart/form-data" method="POST">
         <label id="loadmedia" class="btn btn-primary btn-file medbtn">Load Media<input id="fileinput" type="file" onchange="return videoUpload();" style="display: none;" name="file" accept=".mp4"></label>
     </form> 
-    </form>
 <script>
 
 let cfg = {
-    amp:21,
+    amp:0.1,
     opacity:0.5,
     line_width:4,
     color_scale:1,
@@ -46,7 +47,7 @@ let cfg = {
     ctx : null,
     bgcolor:"#000000",
     canvas:null,
-    diameter:260,
+    diameter:0.3,
     trends:false,
     frame:200,
     depth:200,
@@ -66,7 +67,17 @@ let cfg = {
     timeline:false,
     locator:false,
     media : [],
-    projector: false
+    projector: false,
+    media_loaded : false,
+    last_frame:-1,
+    invert:false, 
+    play:false,
+    delay:0,
+    inverse:false,
+    timer:0,
+    cor: false,
+    correlated:false,
+    real_time:false
 };
 
 
@@ -79,7 +90,7 @@ socket.on('connect', function() {
     }
     else{
         cfg.connected = true;
-        socket.emit('init_process',{'frame':2*cfg.depth,'depth':2*cfg.depth});
+        socket.emit('init_process',{'frame':100*cfg.depth,'depth':100*cfg.depth});
 
     }
 });
@@ -105,15 +116,91 @@ function videoUpload(){
 
 socket.on('video', function(data){
     cfg.medanot = data['annotations'];
+    cfg.startSample = cfg.medanot[0][0]
+    cfg.endSample = cfg.medanot[cfg.medanot.length - 1][0]
+    console.log(`start at f=${cfg.startSample} and ends at f=${cfg.endSample}`) 
+
+
     let videoFileName = data['file_name'];
-    let frameRate = data['frame_rate'];
+    cfg.frameRate = data['frame_rate'];
     let video = document.createElement('video');
     let src = "./uploads/media/"+videoFileName
     video.src = src;
-    console.log('from socket received:',video);
-    // cfg.media.push(video);
-    // makeMedia();
+    video.width = 300;
+    video.controls = false;
+    video.load();
+    let videoContainer = document.getElementById('videoContainer');
+    videoContainer.appendChild(video);
+
+
+
+    video.oncanplay = function() {
+        cfg.media.push(video);
+        makeMedia();
+    };
+
+    cfg.gui.add(cfg, 'delay').min(0).max(0.5).step(0.01);
+    
+    cfg.gui.add(cfg, 'play').onChange(function(value){
+        if(value){
+            play();
+        }
+        else{
+            stop();
+        }
+    });
+
+
 });
+
+function videoanimate(){
+    let t = cfg.media[0].currentTime+cfg.delay;
+    let frame = Math.round(t*cfg.sampling_freq+cfg.startSample);
+    if(cfg.frame!=frame){
+        cfg.frame=frame
+        setFrame();
+        draw();
+        makeLocator();
+        // if(cfg.media_loaded){makeMedia()};
+        if(cfg.sigpreview){
+                makeGuide();
+                gradDisk();
+                signal_line(cfg.previewindex);
+        }
+    }
+    else{
+        cfg.frame += cfg.sampling_freq/8;
+        setFrame();
+        draw();
+        makeLocator();
+        // if(cfg.media_loaded){makeMedia()};
+        if(cfg.sigpreview){
+                makeGuide();
+                gradDisk();
+                signal_line(cfg.previewindex);
+        }
+    }
+
+    cfg.req= requestAnimationFrame(videoanimate);
+
+}
+
+function play(){
+    videoanimate();
+    for(let i=0;i<cfg.media.length;i++){
+        let video = cfg.media[i];
+        video.play();
+    }
+
+}
+
+function stop(){
+    cancelAnimationFrame(cfg.req);
+    for(let i=0;i<cfg.media.length;i++){
+        let video = cfg.media[i];
+        video.pause();
+    }
+}
 
 function setFrame(){
     // cfg.flower = slice(cfg.allFlower,Math.max(0,cfg.frame-cfg.depth),cfg.frame,cfg.step);
@@ -129,6 +216,7 @@ function zoom(event) {
             setFrame();
             draw();
             makeLocator();
+            if(cfg.media_loaded){makeMedia()}
             if(cfg.sigpreview){
                 makeGuide();
                 gradDisk();
@@ -177,8 +265,9 @@ socket.on('init_data',function(data){
     document.body.appendChild(stack);
     stack.appendChild(canvas);
     makeTimeline();
-    draw();
-    makeGuide();
+    // draw();
+    // makeGuide();
+    grow();
     makeOverlay();
     makeLocator();
 
@@ -196,6 +285,7 @@ socket.on('init_data',function(data){
         setFrame();
         draw();
         makeLocator();
+        if(cfg.media_loaded){makeMedia()}
     });
     cfg.frame_handler = frame_handler;
     stream_batches();
@@ -209,26 +299,25 @@ socket.on('init_data',function(data){
         setFrame();
         draw();
     });
-    gui.add(cfg, 'amp').min(0.1).max(40).step(0.1).onChange(function(value) {
+    gui.add(cfg, 'amp').min(-40).max(40).step(0.1).listen().onChange(function(value) {
         draw();
         makeGuide();
-
     });
-    gui.add(cfg, 'diameter').min(0.1).max(600).step(0.1).onChange(function(value) {
+    gui.add(cfg, 'diameter').min(0.1).max(600).step(0.1).listen().onChange(function(value) {
         draw();
         makeGuide();
     });
     gui.add(cfg, 'tention').min(0).max(1).step(0.01).onChange(function(value) {
         draw();
     });
-    gui.add(cfg, 'res').min(0.1).max(1.5).step(0.1).onChange(function(value) {
+    gui.add(cfg, 'res').min(0.1).max(15.5).step(0.1).onChange(function(value) {
         draw();
     });
     gui.add(cfg, 'opacity').min(0.01).max(1).step(0.01).onChange(function(value) {
         draw();
     });
 
-    gui.add(cfg, 'line_width').min(0.01).max(5).step(0.01).onChange(function(value) {
+    gui.add(cfg, 'line_width').min(0.01).max(10).step(0.01).onChange(function(value) {
         draw();
     });
     gui.add(cfg, 'color_scale').min(0.1).max(2).step(0.01).onChange(function(value) {
@@ -260,7 +349,24 @@ socket.on('init_data',function(data){
   makeTimeline();
 });
 
-    gui.add(cfg, 'wheel').min(1).max(10).step(1);
+    gui.add(cfg, 'wheel').min(1).max(30).step(1);
+    gui.add(cfg, 'cor').onChange(function(value){
+        if(value){
+            send_cor_request()
+        }
+        else{
+            clean_cor()
+        }
+    });
+
+    gui.add(cfg, 'real_time').listen().onChange(function(value){
+        if(value){
+            rt_request()
+        }
+        else{
+            clean_rt()
+        }
+    });
     
     gui.add(cfg, 'animate').onChange(function(value){
         if(value){
@@ -273,12 +379,39 @@ socket.on('init_data',function(data){
 
     })
 
+socket.on('rt_error',function(msg){
+    alert(msg.message);
+    cfg.real_time = false;
+})
+
+function rt_request(){
+    socket.emit('rt',{'message':'real_time request','depth':cfg.depth});
+}
+
+function clean_rt(){
+    socket.emit('rt_stop',{'msg':'stop real_time streaming'})
+}
+
+socket.on('rt_data',function(data){
+    cfg.raw =  data['raw']
+    cfg.colors = data['color']
+    cfg.thickness = data['thickness']
+    draw();
+})
+
+
 function stream_batches(){
     let d = Math.min(50000,cfg.maxframes-cfg.allColor.length)
     let frame = cfg.allColor.length + d;
     socket.emit('batch',{'frame':frame,'depth':d});
 }
 
+socket.on('correlation', function(data){
+    cfg.corvals = data['data'];
+    // console.log("corvals:",cfg.corvals)
+    cfg.correlated = true;
+    makeTimeline();
+})
 
 
 socket.on('batch_data',function(data){
@@ -293,12 +426,32 @@ socket.on('batch_data',function(data){
     }
 })
 
+function  send_cor_request(){
+    let f1,f2
+    if(cfg.scrubend){
+        f1 = Math.min(cfg.sf1,cfg.sf2);
+        f2 = Math.max(cfg.sf1,cfg.sf2);
+    }
+    else{
+        f1 = Math.max(cfg.frame - cfg.depth,0);
+        f2 = cfg.frame;
+    }
+    cfg.window_size = f2-f1;
+    socket.emit("cor",{'f1':f1,'f2':f2})
+}
+
+function clean_cor(){
+    cfg.correlated=false;
+    makeTimeline();
+
+}
 
 function animate(){
     cfg.frame = (cfg.frame+cfg.wheel)%(cfg.allColor.length-1);
     setFrame();
     draw();
     makeLocator();
+    if(cfg.media_loaded){makeMedia()};
     if(cfg.sigpreview){
                 makeGuide();
                 gradDisk();
@@ -397,9 +550,49 @@ function makeOverlay(){
         let stack = document.getElementById('stack');
         stack.appendChild(canvas);
 
+        canvas.addEventListener("click",function(e){
+            if(cfg.scrubend){
+                cfg.scrubend = false;
+                cfg.scrubstart = false;
+                makeOverlay();
+            }
+            else{
+                let rmin = cfg.diameter+2*Math.abs(cfg.amp);
+                let canvas = cfg.overcanvas;
+                let rect = canvas.getBoundingClientRect();
+                let x = e.clientX - rect.left-450;
+                let y = 450-e.clientY - rect.top;
+                let r = Math.sqrt((x*x)+(y*y));
+                if(r<rmin){
+                    if(cfg.scrubstart){
+                        cfg.scrubend=true;
+                        let ratio = r/cfg.diameter;
+                        let delta = Math.round(ratio*cfg.depth);
+                        cfg.sf2 = cfg.frame - cfg.depth + delta;
+                        cfg.sr2  = r;
+                    }
+                    else{
+                        cfg.scrubstart=true;
+                        let ratio = r/cfg.diameter;
+                        let delta = Math.round(ratio*cfg.depth);
+                        cfg.sf1 = cfg.frame - cfg.depth + delta;
+                        cfg.sr1  = r;
+                    }
+
+                }
+            }
+
+        })
+
         canvas.addEventListener('mousemove',(e)=>{
         if(!cfg.trends){
-            timeCircle(e);
+            if(cfg.scrubstart){
+                selector(e);
+            }
+            else{
+                timeCircle(e);
+            }
+            
             channelHighlight(e);
         }
         else{
@@ -408,6 +601,104 @@ function makeOverlay(){
         });
     }
     cfg.overctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
+}
+
+function selector(e){
+    let rmin = cfg.diameter+2*Math.abs(cfg.amp);
+    let canvas = cfg.overcanvas;
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left-450;
+    let y = 450-e.clientY - rect.top;
+    if(x!=cfg.lastX || y!=cfg.lastY){
+        // canvas.style.cursor = 'none';
+        if(!cfg.scrubend){
+            makeOverlay();
+            let r = Math.sqrt((x*x)+(y*y));
+            if(r<rmin){
+                let ctx = cfg.overctx;
+                let gradient = ctx.createRadialGradient(450, 450, Math.min(r,cfg.sr1), 450, 450, Math.max(r,cfg.sr1));
+                gradient.addColorStop(0, 'rgba(256,256,256,0.8)');
+                gradient.addColorStop(.35, 'rgba(0,0,0,0)');
+                gradient.addColorStop(.65, 'rgba(0,0,0,0)');
+                gradient.addColorStop(1, 'rgba(256,256,256,0.8)');
+                
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(450, 450, cfg.sr1, 0, 2 * Math.PI, false);
+                ctx.arc(450, 450, r, 0, 2*Math.PI,true);
+                ctx.lineWith = 1;
+                ctx.setLineDash([1, 3]);
+                ctx.strokeStyle = 'rgba(255,255,255,1)';
+                ctx.stroke();
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.fillRect(430+Math.min(cfg.sr1,r)+Math.abs(r-cfg.sr1)/2, 450-7.5,40, 15)
+                ctx.font = "10px monospace";
+                ctx.textAlign = "center";
+                ctx.fillStyle = 'rgba(255,255,255,1)';
+                let ratio = Math.abs(r-cfg.sr1)/cfg.diameter;
+                let delta = Math.round(ratio*1000*cfg.depth/cfg.sampling_freq);
+                ctx.fillText(String(delta)+" ms", 450+Math.min(cfg.sr1,r)+Math.abs(r-cfg.sr1)/2, 452);
+                ctx.restore();
+                cfg.lastX = x;
+                cfg.lastY = y;
+            }
+        }
+    
+    }
+
+}
+
+function timeCircle(e){
+    let rmin = cfg.diameter+2*Math.abs(cfg.amp);
+    let canvas = cfg.overcanvas;
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left-450;
+    let y = 450-e.clientY - rect.top;
+    if(x!=cfg.lastX || y!=cfg.lastY){
+        // canvas.style.cursor = 'none';
+        makeOverlay();
+        let r = Math.sqrt((x*x)+(y*y));
+        if(r<rmin){
+        let ctx = cfg.overctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 2;
+        ctx.arc(450, 450, r, 0, 2 * Math.PI, false);      
+        ctx.lineWith = 1;
+        ctx.setLineDash([1, 3]);
+        ctx.strokeStyle = 'rgba(255,255,255,1)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(450,450);
+        ctx.lineTo(450+x,450-y);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(430+x/2, 440-y/2,40, 15)
+        
+        ctx.font = "10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = 'rgba(255,255,255,1)';
+        let ratio = r/cfg.diameter;
+        let delta = Math.round(ratio*1000*cfg.depth/cfg.sampling_freq);
+        ctx.fillText(String(delta)+" ms", 450+x/2, 450-y/2);
+        ctx.restore();
+        cfg.lastX = x;
+        cfg.lastY = y;
+    }
+    else{
+        canvas.style.cursor = 'default';
+    }
+    
+    }
+
 }
 
 function makeLocator(){
@@ -428,8 +719,9 @@ function makeLocator(){
             let x = e.clientX-10;
             cfg.frame = Math.round(cfg.maxframes*x/1180);
             setFrame();
-            makeLocator();
             draw();
+            makeLocator();
+            if(cfg.media_loaded){makeMedia()}
 
         })
     }
@@ -479,12 +771,12 @@ function makeTimeline(){
     let cnum = colors.length;
     ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
 
-    for(let i=0;i<cnum-1;i++){
-        x1 = 10+1180*i/cfg.maxframes;
-        x2 = 10+1180*(i+1)/cfg.maxframes;
-        y = 20;
-        cols1 =colorize(colors[i]);
-        ss1 = `rgba(${cols1[0]},${cols1[1]},${cols1[2]},${1})`;
+    for(let i=0;i<cnum-3;i=i+3){
+        let x1 = 10+1180*i/cfg.maxframes;
+        let x2 = 10+1180*(i+3)/cfg.maxframes;
+        let y = 20;
+        let cols1 =colorize(colors[i]);
+        let ss1 = `rgba(${cols1[0]},${cols1[1]},${cols1[2]},${1})`;
         // cols2 =colorize(colors[i+1]);
         // ss2 = `rgba(${cols2[0]},${cols2[1]},${cols2[2]},${1})`;
         // let lineGrad = ctx.createLinearGradient(x1,y,x2,y);
@@ -493,63 +785,30 @@ function makeTimeline(){
         ctx.beginPath();
         ctx.moveTo(x1,y);
         ctx.lineTo(x2,y);
-        let lw = 2+13*(0.7+thickness[i]);
+        let lw = 5+18*(0.7+thickness[i]);
         ctx.lineWidth = lw;
         ctx.strokeStyle = ss1;
         ctx.stroke();
-    }
 
+        if(cfg.correlated){
+            
+            ctx.save();
+            let cx1 = 10+1180*(i+Math.round(cfg.window_size))/cfg.maxframes;
+            let cx2 = 10+1180*(i+3+Math.round(cfg.window_size))/cfg.maxframes;
+            let  cy1 = y-5*cfg.corvals[i];
+            let  cy2 = y-5*cfg.corvals[i+3];
+            // console.log(`cy1:${cy1},cy2:${cy2}`)
+            ctx.beginPath();
+            ctx.moveTo(x1,cy1);
+            ctx.lineTo(x2,cy2);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(256,256,256,0.7)';
+            ctx.stroke();
+            ctx.restore;
+        }
+    }
 }
 
-function timeCircle(e){
-    let rmin = cfg.diameter+2*cfg.amp;
-    let canvas = cfg.overcanvas;
-    let rect = canvas.getBoundingClientRect();
-    let x = e.clientX - rect.left-450;
-    let y = 450-e.clientY - rect.top;
-    if(x!=cfg.lastX || y!=cfg.lastY){
-        // canvas.style.cursor = 'none';
-        makeOverlay();
-        let r = Math.sqrt((x*x)+(y*y));
-        if(r<rmin){
-        let ctx = cfg.overctx;
-        ctx.save();
-        ctx.beginPath();
-        ctx.shadowColor = 'black';
-        ctx.shadowBlur = 2;
-        ctx.arc(450, 450, r, 0, 2 * Math.PI, false);      
-        ctx.lineWith = 1;
-        ctx.setLineDash([1, 3]);
-        ctx.strokeStyle = 'rgba(255,255,255,1)';
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(450,450);
-        ctx.lineTo(450+x,450-y);
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(430+x/2, 440-y/2,40, 15)
-        
-        ctx.font = "10px monospace";
-        ctx.textAlign = "center";
-        ctx.fillStyle = 'rgba(255,255,255,1)';
-        let ratio = r/cfg.diameter;
-        let delta = Math.round(ratio*1000*cfg.depth/cfg.sampling_freq);
-        ctx.fillText(String(delta)+" ms", 450+x/2, 450-y/2);
-        ctx.restore();
-        cfg.lastX = x;
-        cfg.lastY = y;
-    }
-    else{
-        canvas.style.cursor = 'default';
-    }
-    
-    }
-
-}
 
 function makeGuide(){
     if(!cfg.guidectx){
@@ -586,13 +845,12 @@ function makeGuide(){
     }
     else{
     ctx.beginPath();
-    ctx.arc(450, 450, (cfg.diameter+2*cfg.amp), 0, 2 * Math.PI, false);      
+    ctx.arc(450, 450, (cfg.diameter+2*Math.abs(cfg.amp)), 0, 2 * Math.PI, false);      
     ctx.lineWith = 5;
     ctx.strokeStyle = '#aaaaaa';
     ctx.stroke();
-
     for(let i=0;i<labels.length;i++){
-        let r = 20+(cfg.diameter+2*cfg.amp)
+        let r = 20+(cfg.diameter+2*Math.abs(cfg.amp))
         let theta = -Math.PI*2*i/num_chans;
         let x = 450+r*Math.cos(theta);
         let y = 450+r*Math.sin(theta);
@@ -612,7 +870,7 @@ function makeGuide(){
 
     if(cfg.rulers){
         ctx.lineWith = 1;
-        let r = (cfg.diameter+2*cfg.amp)
+        let r = (cfg.diameter+2*Math.abs(cfg.amp))
         for(let j=0;j<labels.length;j++){
             let theta = Math.PI*2*j/num_chans;
             let shift = Math.PI/num_chans;
@@ -620,7 +878,6 @@ function makeGuide(){
             let y1 = 450+r*Math.sin(theta+shift);
             let x2 = 450+r*Math.cos(theta+shift)/10;
             let y2 = 450+r*Math.sin(theta+shift)/10;
-
 
             let gradient = ctx.createLinearGradient(x1, y1, x2, y2);
             gradient.addColorStop("0", 'rgba(255,255,255,0.7)');
@@ -631,16 +888,12 @@ function makeGuide(){
             ctx.strokeStyle = gradient;
             ctx.stroke();
     }
-
     }
 
 }
 
-
-
-
 function channelHighlight(e){
-    let rmin = cfg.diameter+2*cfg.amp;
+    let rmin = cfg.diameter+2*Math.abs(cfg.amp);
     let rmax = 30+rmin;
     let rect = cfg.guidecanvas.getBoundingClientRect();
     let x = e.clientX - rect.left-450;
@@ -670,7 +923,7 @@ function channelHighlight(e){
 
 function gradDisk(){
     let ctx = cfg.guidectx;
-    let H = 2*(cfg.diameter+2*cfg.amp);
+    let H = 2*(cfg.diameter+2*Math.abs(cfg.amp));
     let grd = ctx.createLinearGradient(450, 450-H/3, 450, 450+H/3);
     // Add colors
     grd.addColorStop(0.000, 'rgba(0, 0, 0, 0.000)');
@@ -687,10 +940,9 @@ function gradDisk(){
 }
 
 function signal_line(ind){
-
     let amp = 17;
     let ctx = cfg.guidectx;
-    let W = 0.9*2*(cfg.diameter+2*cfg.amp);
+    let W = 0.9*2*(cfg.diameter+2*Math.abs(cfg.amp));
     let data = cfg.raw;
     let color = cfg.colors;
     for(let i=0;i<data.length-1;i++){
@@ -744,7 +996,6 @@ function drawTrends(){
             ss1 = `rgba(${cols1[0]},${cols1[1]},${cols1[2]},${1})`;
             cols2 =colorize(color[j+1]);
             ss2 = `rgba(${cols2[0]},${cols2[1]},${cols2[2]},${1})`;
-
             let x1 = 50+ j*W/num_samples;
             let x2 = 50+ (j+1)*W/num_samples;
             let y1 = 70+i*H/num_chans-0.3*amp*raw[j][i];
@@ -754,7 +1005,7 @@ function drawTrends(){
             lineGrad.addColorStop(1.000, ss2);
             ctx.beginPath();
             
-            let lw = 0.2+line_width*(0.7+cfg.thickness[j]);
+            let lw = 1+line_width*(0.7+cfg.thickness[j]);
             ctx.lineWidth = lw;
             // console.log(cfg.thickness[j]);
             ctx.moveTo(x1,y1);
@@ -763,11 +1014,9 @@ function drawTrends(){
             // ctx.lineWidth = line_width;
             ctx.stroke();
         }
-
     }
     ctx.restore();
 }
-
 
 function makeMedia(){
     if(!cfg.projector){
@@ -783,27 +1032,95 @@ function makeMedia(){
         let stack = document.getElementById('stack');
         stack.insertBefore(canvas,stack.childNodes[0]);
         canvas.addEventListener('wheel',zoom);
+        cfg.media_loaded = true;
+ 
     }
-    console.log('make media!');
     let canvas = cfg.projector;
     let ctx = cfg.projctx;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+
+
+    let max_width = 300;
+    let x = 1200-20-max_width
+    let y = 70
+
+
+    // 
     for(let i=0;i<cfg.media.length;i++){
         let video = cfg.media[i];
         let vw = video.videoWidth;
         let vh = video.videoHeight;
-        console.log('video:', video);
         let aspectRatio = vh/vw;
-        let max_width = 1200-900-40;
         let max_height = aspectRatio*max_width;
-        ctx.save();
-        ctx.strokeStyle = 'rgba(100,100,100,1)';
-        ctx.lineWidth = 1;
-        // ctx.strokeRect(1200-20-max_width,70,max_width,max_height);
-        ctx.fillStyle = 'rgba(100,100,100,1)';
-        ctx.fillRect(1200-20-max_width,70,max_width,max_height);
-        ctx.restore();
+        if(cfg.frame<cfg.startSample || cfg.frame>cfg.endSample){
+            video.style.zIndex = 1;
+            ctx.strokeStyle = 'rgba(100,100,100,1)';
+            ctx.lineWidth = 1;
+            ctx.fillStyle = 'rgba(30,30,30,1)'
+            ctx.fillRect(x,y,max_width,max_height);
+            ctx.font = "15px monospace";
+            ctx.textAlign = "center";
+            ctx.fillStyle = 'rgba(255,255,255,1)';
+            let message = "No Video At This Time"
+            ctx.fillText(message, x+max_width/2, y+max_height/2);
+        }
+        else{
+            video.style.zIndex=50000;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            let ind = cfg.frame - cfg.startSample
+            let frame = cfg.medanot[ind][1];
+            if(frame!=cfg.last_frame){
+                let time  = frame/cfg.frameRate;
+                video.currentTime = time-cfg.delay;
+                cfg.last_frame = frame;
+            }  
+        }
     }
+
+    
+    ctx.save();
+    let vx1 = 10+1180*cfg.startSample/cfg.maxframes;
+    let vx2 = 10+1180*cfg.endSample/cfg.maxframes;
+    let vy = 20;
+    let l = 6;
+    ctx.fillStyle = 'rgba(256,256,256,0.7)';
+    ctx.beginPath();
+    ctx.moveTo(vx1,vy+l);
+    ctx.lineTo(vx1,vy-l);
+    ctx.lineTo(vx1+l,vy);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(vx2,vy+l);
+    ctx.lineTo(vx2,vy-l);
+    ctx.lineTo(vx2-l,vy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+function grow(){
+        cfg.diameter +=10-cfg.timer;
+        if(cfg.diameter<100){
+            cfg.amp +=0.1;
+        }
+        else{
+            cfg.amp +=1.1;
+        }
+        
+        cfg.timer +=0.2;
+        cfg.frame +=Math.round(10-cfg.timer);
+        setFrame();
+        draw();
+        makeGuide();
+        if(cfg.diameter<250){
+            cfg.greq = requestAnimationFrame(grow)
+        }
+        else{
+            cancelAnimationFrame(cfg.greq)
+        }
+
 }
 
 </script>

@@ -74,13 +74,14 @@ socket.on('connect', function() {
 socket.on('edf_info',function(info){
     // console.log(info);
     let channel_labels = info['channel_labels'];
+    let sampling_freq = info['sampling_frequency'];
+    params.sampling_freq = sampling_freq
     params.chan_count = channel_labels.length;
-    let file_duration = info['file_duration'];
     let preview = info['preview'];
     
 
     let message = document.getElementById('processing');
-    message.innerHTML="Select Channels with Identical Sampling Rate to Display";
+    message.innerHTML="Select Channels";
     let spinner = document.getElementById('spinner');
     spinner.style.display  = 'none';
     let chanlist  = document.getElementById('chanlist');
@@ -121,8 +122,8 @@ socket.on('edf_info',function(info){
     table.appendChild(tr);
 
     for(let i =0; i<channel_labels.length;i++){
-        name = channel_labels[i][0];
-        fps  = channel_labels[i][1];
+        name = channel_labels[i];
+        fps  = params.sampling_freq;
         freqs[i]=fps;
 
         var tr = document.createElement('tr');   

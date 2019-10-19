@@ -1,13 +1,15 @@
 import os
 from flask import Flask, flash, request, redirect, url_for, render_template, send_from_directory
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, disconnect
 # from flask_jsglue import JSGlue
-import pyedflib
-import numpy as np
+import mne
 from scipy import signal
 from sklearn.decomposition import FastICA, MiniBatchDictionaryLearning
 import json
 import moviepy.editor as e
+import numpy as np
+from pylsl import StreamInlet, resolve_stream
+
 
 global data
 data = {}
@@ -48,6 +50,22 @@ def remove_xfix(strs):
   rev = [word[::-1] for word in strs]
   post = os.path.commonprefix(rev)
   return [word.replace(pre,'').replace(post[::-1],'') for word in strs]
+
+def symmetric_conv(d):
+    drp = np.roll(d,1,axis=1)
+    drn = np.roll(d,-1,axis=1)
+    return np.vstack([drn,d,drp])
+def causal_conv(d):
+    drn = np.roll(d,-1,axis=1)
+    return np.vstack([drn,d])
+def repeatfunc(func,num,mat):
+    if num==1:
+        return func(mat)
+    else:
+        return repeatfunc(func,num-1,func(mat))
+   
+
+
 
 # def polar_distance(theta_array):
 #     length = theta_array.shape[0]
@@ -146,11 +164,6 @@ def connect():
 ##################################################################################################
 
 
-@socketio.on('preprocess')
-def preprocess():
-    pass
-
-
 @socketio.on('init_process')
 def raw_process(dic):
     frame = dic['frame']
@@ -186,10 +199,19 @@ def raw_process(dic):
     socketio.sleep(0)
 
     model = FastICA(n_components=4, random_state=0)
+    d = data['signal_raw']
+    # ddd = repeatfunc(symmetric_conv,2,d)
+    print("d-shape:",d.shape)
+    # print("ddd-shape:",ddd.shape)
+
+    
+
+
     # model = MiniBatchDictionaryLearning(n_components=4, alpha=0.1,
     #                                         n_iter=10, batch_size=200,
     #                                         random_state=0,positive_dict=True)
-    data['W'] = model.fit_transform(data['signal_raw'].T)
+    data['model'] = model.fit(d.T)
+    data['W'] = data['model'].transform(d.T)
 
     
     data['W'] = data['W']-np.mean(data['W'],axis=0).reshape(1,4)
@@ -228,44 +250,46 @@ def send_batch(dic):
     emit('batch_data',data['out'])
     print(f"{100*frame/len(data['signal_raw'].T)}% of the data is sent")
     data['processed'] = True
-    
+
+@socketio.on('cor')
+def cor(dic):
+    f1 = dic['f1']
+    f2 = dic['f2']
+    corr = signal.correlate(data['signal_raw'].T, (data['signal_raw'].T)[f1:f2], mode='same',method='fft')[:,2]
+    # corr = signal.correlate(data['W'], data['W'][f1:f2], mode='same',method='fft')[:,2]
+    corr = corr - np.mean(corr)
+    corr = corr/np.std(corr)
+    socketio.emit("correlation",jsonify({'data':corr}))
 
 def load_edf():
     global data
-    f = pyedflib.EdfReader(data['edf_file_path'])
-    channel_labels = f.getSignalLabels()
-    data['channel_labels'] = channel_labels
-    sampling_freqs = f.getSampleFrequencies()
-    data['sampling_freqs'] = sampling_freqs
-    file_duration = f.getFileDuration()
-
-    data['raw_annotations'] = f.read_annotation()
-   
-        
-    # print(f'Annotations:')
-    # print(f'start: {a[0]}, end: {a[-1]}')
-    # print(f'video starts at sample {START_SAMPLE}')
-
-    n = f.signals_in_file
-    channel_list = []
     standard_channels = []
-    for i in np.arange(n):
-        raw_channel = f.readSignal(i)
-        # filtered_signal = highpass_filter(raw_channel,sampling_freqs[i])
-        channel_list.append(raw_channel)
-    data['raw_channel_list']=channel_list
+    f = mne.io.read_raw_edf(data['edf_file_path'])
+    channel_labels = f.ch_names
+    data['channel_labels'] = channel_labels
+
+    sampling_freqs = f.info['sfreq']
+    data['sampling_freqs'] = sampling_freqs
+
+    data['raw_annotations'] = mne.read_annotations(data['edf_file_path'])
+
+    data['raw_channel_list']=f.get_data()
+    print('data shape: ',data['raw_channel_list'].shape)
     print('standardizing ...')
-    for channel in channel_list:
-        standard = channel -  np.mean(channel)
-        standard = standard/np.std(standard)
-        standard_channels.append(standard)
-    
-    preview = [ch[:min(len(ch),500)] for ch in standard_channels]
+    preview = data['raw_channel_list'][:,:500]
+    print('first mean shape:',np.mean(preview,axis=1))
+    preview = (preview.T - np.mean(preview,axis=1)).T
+    for i in range(len(preview)):
+        std = np.std(preview[i,:])
+        if  std>0:
+            preview[i,:] = preview[i,:]/std
 
-    labels = list(map(list, zip(channel_labels,sampling_freqs)))
-    # return {'channel_labels':labels, 'file_duration':file_duration}
+    # for channel in data['raw_channel_list'][:,:500]:
+    #     standard = channel -  np.mean(channel)
+    #     standard = standard/np.std(standard)
+    #     standard_channels.append(standard)
 
-    return jsonify({'channel_labels':labels, 'file_duration':file_duration, 'preview':preview})
+    return jsonify({'channel_labels':channel_labels,'sampling_frequency':sampling_freqs,'preview':preview})
 
 
 @app.route('/settings',  methods=['GET', 'POST'])
@@ -275,7 +299,7 @@ def settings():
         selected_channel_indices  = [int(box) for box in request.form]
         data['selected_channel_list'] = [data['raw_channel_list'][index] for index in selected_channel_indices]
         data['selected_channel_labels'] = remove_xfix([data['channel_labels'][index] for index in selected_channel_indices])
-        data['sampling_freq'] = [data['sampling_freqs'][index] for index in selected_channel_indices][0]
+        data['sampling_freq'] = data['sampling_freqs']
         return render_template('settings.html',f=int(data['sampling_freq']))
     return redirect(request.url)
 
@@ -289,9 +313,15 @@ def gui():
         a = data['raw_annotations']
         if len(a)>0:
             try:
-                data['media_annotations'] = [[np.ceil(data['sampling_freq']*(anot[0]/10000000)/data['resampling_rate']).astype(np.int),int(anot[2].split(b'#')[1])] for anot in a]
+                data['media_annotations'] = []
+                for annot in a:
+                    onset = annot['onset']
+                    onset_frame = np.round(data['sampling_freq']*onset/data['resampling_rate']).astype(np.int)
+                    value = int(annot['description'].split('#')[1])
+                    data['media_annotations'].append([onset_frame,value])
+                print("first annotation:",a[0])
+                print("last annotation:",a[-1])
                 data['media_annotated'] = True
-
                         #interpolate annotations
                 annot = np.array(data['media_annotations'])
                 annotations=[]
@@ -335,8 +365,64 @@ def media():
 
 @app.route('/uploads/media/<filename>')
 def send_file(filename):
-    return send_from_directory(app.config['MEDIA_UPLOAD_FOLDER'], filename)
+    try:
+        return send_from_directory(app.config['MEDIA_UPLOAD_FOLDER'], filename, as_attachment=True)
+    except:
+        pass
+@socketio.on('rt_stop')
+def rt_stop(msg):
+    print(msg)
+    global data
+    data['rt_status']=False
 
+@socketio.on('rt')
+def realtime(msg):
+    print(msg)
+    depth = msg['depth']
+    global data
+    data['buffer']=[]
+    data['counter'] = 0
+
+    stream_name = 'medialab-EEG'
+    streams = resolve_stream('type', 'EEG')
+
+    try:
+        for i in range (len(streams)):
+
+            if (streams[i].name() == stream_name):
+                index = i
+                print ("NIC stream available")
+
+        print ("Connecting to NIC stream... \n")
+        inlet = StreamInlet(streams[index])
+        data['rt_status'] = True
+
+
+    except NameError:
+        print ("Error: NIC stream not available\n\n\n")
+        emit('rt_error',{'message':'EEG not available'})
+
+    while data['rt_status']:
+        sample, timestamp = inlet.pull_sample()
+        data['buffer'].append(sample)
+        data['counter'] += 1
+        if len(data['buffer'])>=depth and data['counter'] >= 10:
+            chunk = np.array(data['buffer']).T
+            del data['buffer'][:data['counter']]
+            data['counter'] = 0
+            chunk = highpass_filter(chunk,data['sampling_freq'],data['lcf'],data['hcf'],data['filter_size'])
+            chunk = chunk-np.mean(chunk,axis=0).reshape(1,depth)
+            chunk = chunk - np.mean(chunk, axis=1).reshape(32,1)
+            chunk = chunk/np.std(chunk,axis=0).reshape(1,depth)
+
+            latent = data['model'].transform(chunk.T)
+            latent = latent-np.mean(latent,axis=0).reshape(1,4)
+            latent = 0.5+ 0.5*latent/np.std(latent,axis=0).reshape(1,4)
+            out = {'raw':chunk.T,'color':latent[:,0:3],'thickness':latent[:,3]}
+            out = jsonify(out)
+            socketio.sleep(0)
+            socketio.emit('rt_data',out)
+    
 
 if __name__ == "__main__":
     socketio.run(app, debug=True)

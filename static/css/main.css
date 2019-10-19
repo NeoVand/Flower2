@@ -241,3 +241,23 @@ input[type=checkbox]
   bottom: 34px;
   right: 80px;
 }
+
+/* .inverted {
+	filter: invert(100%);
+}
+
+.normal {
+	filter: invert(0%);
+} */
+
+#videoContainer{
+  position: absolute;
+  top:70px;
+  right:420px;
+  background: "rgba(100,100,100,0.5)";
+  
+}
+#media{
+  position: relative;
+}
+
