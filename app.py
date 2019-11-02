@@ -211,6 +211,13 @@ def raw_process(dic):
     #                                         n_iter=10, batch_size=200,
     #                                         random_state=0,positive_dict=True)
     data['model'] = model.fit(d.T)
+    data['components'] = model.components_.T
+    # data['components'] = data['components']-np.mean(data['components'],axis=0).reshape(1,4)
+    # data['components'] = data['components']/np.std(data['components'],axis=0).reshape(1,4)
+    data['components'] = data['components']-np.mean(data['components'])
+    data['components'] = data['components']/np.std(data['components'])
+
+    print('shape of components:',data['components'].shape)
     data['W'] = data['model'].transform(d.T)
 
     
@@ -229,7 +236,9 @@ def raw_process(dic):
             'color':data['W'][frame-depth:frame,0:3],\
                 'thickness':data['W'][frame-depth:frame,3],\
                     'full_size':len(data['signal_raw'][0]),\
-                        'labels':data['selected_channel_labels'], 'media_annotated':data['media_annotated']}
+                        'labels':data['selected_channel_labels'],\
+                             'media_annotated':data['media_annotated'],\
+                                 'components':data['components'].T}
 
     data['out'] = jsonify(data['out'])
     emit('init_data',data['out'])

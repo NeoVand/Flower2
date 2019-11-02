@@ -12,6 +12,7 @@
     <script type="text/javascript" src="./static/js/dat.gui.js"></script>
     <script type="text/javascript" src="./static/js/colorconvert.js"></script>
     <script src="./static/js/three.min.js"></script> 
+    <script src="./static/js/Tone.js"></script> 
 
 <title>GUI</title>
 </head>
@@ -77,7 +78,14 @@ let cfg = {
     timer:0,
     cor: false,
     correlated:false,
-    real_time:false
+    real_time:false,
+    sono:false,
+    volume:-10,
+    red : 1,
+    green : 1,
+    blue:1,
+    sono_scale:37,
+    sono_amp:167,
 };
 
 
@@ -214,6 +222,9 @@ function zoom(event) {
             var dy = Math.round(event.deltaY/120);
             cfg.frame =Math.max(cfg.frame-cfg.wheel*dy,1);
             setFrame();
+            if(cfg.sono){
+                sonify();
+            }
             draw();
             makeLocator();
             if(cfg.media_loaded){makeMedia()}
@@ -233,6 +244,8 @@ socket.on('init_data',function(data){
     cfg.maxframes  = data['full_size'];
     cfg.labels = data['labels'];
     cfg.sampling_freq = data['sampling_freq'];
+    cfg.components = data['components'];
+    console.log("components:",cfg.components);
     let media_annotated = data['media_annotated'];
     if(media_annotated){
         let loadmediabtn = document.getElementById("loadmedia");
@@ -349,7 +362,32 @@ socket.on('init_data',function(data){
   makeTimeline();
 });
 
-    gui.add(cfg, 'wheel').min(1).max(30).step(1);
+gui.add(cfg, 'red').min(0).max(1).step(0.1).onChange(function(value) {
+        draw();
+        if(cfg.sono){
+        sonify();
+     }
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
+gui.add(cfg, 'green').min(0).max(1).step(0.1).onChange(function(value) {
+        draw();
+        if(cfg.sono){
+        sonify();
+     }
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
+gui.add(cfg, 'blue').min(0).max(1).step(0.1).onChange(function(value) {
+        draw();
+        if(cfg.sono){
+        sonify();
+     }
+    }).onFinishChange(function(value) {
+  makeTimeline();
+});
+
+    gui.add(cfg, 'wheel').min(0.1).max(20).step(0.1);
     gui.add(cfg, 'cor').onChange(function(value){
         if(value){
             send_cor_request()
@@ -357,6 +395,47 @@ socket.on('init_data',function(data){
         else{
             clean_cor()
         }
+    });
+
+    gui.add(cfg,'sono').onChange(function(value){
+        if(value){
+            var reverb = new Tone.Reverb(3.8).toMaster();
+            // var autoFilter = new Tone.AutoWah(50, 6, 0).toMaster();
+            cfg.oscs = []
+            for(let i=0;i<3;i++){
+                cfg.oscs.push(new Tone.Oscillator(440, "triangle10").toMaster());
+            }
+            
+            cfg.oscs.forEach((o,i)=>{
+                o.connect(reverb);
+                // o.connect(autoFilter);
+                o.volume.value = cfg.volume;
+                // o.partials = [1, 0.2, 0.01];
+                o.start();
+            })
+            sonify() 
+        }
+        else{
+            stop_sound()
+        }
+    })
+    gui.add(cfg,'volume').min(-40).max(-5).step(0.1).onChange((value)=>{
+        if(cfg.sono){
+            sonify()
+        }
+
+    });
+
+    gui.add(cfg,'sono_scale').min(1).max(200).step(0.1).onChange((value)=>{
+        if(cfg.sono){
+        sonify();
+     }
+    });
+
+    gui.add(cfg,'sono_amp').min(1).max(500).step(0.1).onChange((value)=>{
+        if(cfg.sono){
+        sonify();
+     }
     });
 
     gui.add(cfg, 'real_time').listen().onChange(function(value){
@@ -378,6 +457,21 @@ socket.on('init_data',function(data){
     });
 
     })
+
+function sonify(){
+    cfg.oscs.forEach((o,i)=>{
+        o.frequency.rampTo(cfg.sono_scale*(i+1)+cfg.sono_amp*cfg.colors[cfg.colors.length-1][i],0.001);
+        // o.frequency.value = cfg.sono_scale*(i+1)+cfg.sono_amp*cfg.colors[cfg.colors.length-1][i];
+        o.volume.value = (2*cfg.volume+10*cfg.colors[cfg.colors.length-1][i])-([1/cfg.red,1/cfg.green,1/cfg.blue][i]);
+    })
+}
+
+function stop_sound(){
+    cfg.oscs.forEach((o,i)=>{
+        o.dispose();
+    })
+}
+
 
 socket.on('rt_error',function(msg){
     alert(msg.message);
@@ -449,6 +543,9 @@ function clean_cor(){
 function animate(){
     cfg.frame = (cfg.frame+cfg.wheel)%(cfg.allColor.length-1);
     setFrame();
+    if(cfg.sono){
+                sonify();
+            }
     draw();
     makeLocator();
     if(cfg.media_loaded){makeMedia()};
@@ -471,15 +568,16 @@ function draw(){
 }
 
 function colorize(col){
-    cs= cfg.color_scale;
-    csh = cfg.color_shift;
-    cols = new Array();
+    let cs= cfg.color_scale;
+    let csh = cfg.color_shift;
+    let cols = new Array();
     for(let i=0;i<3;i++){
         let color = csh+256*cs*col[i];
         cols.push(color);
     }
     cols = rgbToHsl(...cols);
     cols = hslToRgb(cfg.hue_shift+cols[0]-Math.floor(cfg.hue_shift+cols[0]), cfg.saturation*cols[1], cfg.brightness*cols[2]);
+    cols = [cols[0]*cfg.red, cols[1]*cfg.green, cols[2]*cfg.blue];
     return cols;
 }
 
@@ -719,6 +817,9 @@ function makeLocator(){
             let x = e.clientX-10;
             cfg.frame = Math.round(cfg.maxframes*x/1180);
             setFrame();
+            if(cfg.sono){
+                sonify()
+            }
             draw();
             makeLocator();
             if(cfg.media_loaded){makeMedia()}
@@ -831,6 +932,50 @@ function makeGuide(){
     let num_chans = labels.length
     let ctx = cfg.guidectx;
     ctx.clearRect(0, 0, cfg.canvas.width, cfg.canvas.height);
+
+
+    ctx.save();
+    ctx.beginPath();
+      ctx.arc(110, 130, 0.25*220, 0, 2 * Math.PI, false);
+      ctx.fillStyle = "#222222";
+      ctx.fill();
+    ctx.restore();
+    ctx.save();
+    for(let c=0;c<4;c++){
+        let vectors = cfg.components[c].map((v,k)=>{
+            let theta = -2*Math.PI*k/(num_chans)
+            let r =  0.25*(220+cfg.amp*v);
+            let x = 110+r*Math.cos(theta);
+            let y = 130+r*Math.sin(theta);
+            let z = 0;
+            return new THREE.Vector3( x, y, z );
+        });
+        let curve = new THREE.CatmullRomCurve3(vectors,closed=true,type="catmullrom",tention=cfg.tention);
+        let points = curve.getPoints( num_chans+Math.floor(500) );
+        let num_points = points.length;        
+        ctx.beginPath();
+        // ctx.lineJoin = "round";
+        let x1 = points[0].x;
+        let y1 = points[0].y;
+        ctx.moveTo(x1,y1);
+        // End point  
+        for(let j=1; j<num_points;j++){
+            let x2 = points[(j)%num_points].x;
+            let y2 = points[(j)%num_points].y;
+            ctx.lineTo(x2,y2);
+            // Make the line visible
+            // Set Color
+        }
+        cols =colorize([[1,0,0],[0,1,0],[0,0,1],[0.5,0.5,0.5]][c]);
+        ss = `rgba(${cols[0]},${cols[1]},${cols[2]},${cfg.opacity})`;
+        ctx.strokeStyle = ss;
+        ctx.lineWidth = 2;
+        ctx.closePath();
+        ctx.stroke();
+    }
+    ctx.restore();
+
+
 
     if(cfg.trends){
 
