@@ -1,4 +1,6 @@
 # Flower
+[![Flower Video Demonstration] (http://img.youtube.com/vi/_tNFDPvlLZs/0.jpg)](http://www.youtube.com/watch?v=_tNFDPvlLZs "Flower Demo")
+
 Flower is a new visualization tool for in-depth study of multi-sensor recordings in the time domain. It has been released for public download as a fully functioning tool available for experimental, research, and creative use. Flower uses unsupervised machine learning to extract latent representations for time-series data (EEG in particular) and show them through different visualization settings. In particular, it adds color and thickness to time-series plots, making them easier to understand and compare. Flower aims to enable more natural intuition around data results, using machine intelligence to translate time-series data for improved understanding by the human eye.
 ## Installation
 1. Download and Install Anaconda from: https://www.anaconda.com/distribution/
